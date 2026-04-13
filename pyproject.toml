@@ -3,8 +3,7 @@ name = "live-depth"
 version = "0.1.0"
 requires-python = ">=3.10,<3.11"
 dependencies = [
-    "torch>=2.10.0",
-    "torchvision>=0.20.0",
+    "torch",
     "timm",
     "einops",
     "omegaconf",
@@ -29,15 +28,6 @@ torch = [
     { url = "https://developer.download.nvidia.com/compute/redist/jp/v61/pytorch/torch-2.5.0a0+872d972e41.nv24.08.17622132-cp310-cp310-linux_aarch64.whl", marker = "platform_machine == 'aarch64'" },
     { index = "pytorch", marker = "platform_machine == 'x86_64'" },
 ]
-torchvision = [
-    { url = "https://developer.download.nvidia.com/compute/redist/jp/v61/pytorch/torchvision-0.20.0a0+afc54cf-cp310-cp310-linux_aarch64.whl", marker = "platform_machine == 'aarch64'" },
-    { index = "pytorch", marker = "platform_machine == 'x86_64'" },
-]
-
-[[tool.uv.index]]
-name = "jetson"
-url  = "https://pypi.jetson-ai-lab.io/jp6/cu126"
-explicit = true
 
 [[tool.uv.index]]
 name = "pytorch"
