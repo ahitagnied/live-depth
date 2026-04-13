@@ -46,6 +46,8 @@ class DepthEstimator:
         if not torch.cuda.is_available():
             sys.exit("CUDA not available")
 
+        torch._dynamo.config.disable = True
+
         self.scale, self.valid_iters, self.max_disp = scale, valid_iters, max_disp
         self._Padder    = InputPadder
         self._amp_dtype = AMP_DTYPE
