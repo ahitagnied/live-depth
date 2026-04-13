@@ -8,7 +8,7 @@ dependencies = [
     "timm",
     "einops",
     "omegaconf",
-    "numpy",
+    "numpy<2",
     "scipy",
     "scikit-image",
     "opencv-contrib-python-headless",
