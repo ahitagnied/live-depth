@@ -1,3 +1,8 @@
+"""
+OAK-D camera API: init, get intrinsics, capture rectified stereo.
+Mirrors zed/camera.py surface (init + get_camera_intrinsics + capture).
+"""
+
 import os
 import time
 
@@ -9,12 +14,14 @@ from . import util
 
 
 def init_oak():
+    """Open OAK device and read calibration. Returns (device, calib). Caller must close device."""
     device = dai.Device()
     calib = device.readCalibration()
     return device, calib
 
 
 def create_stereo_queues(pipeline):
+    """Add left and right camera nodes to an open pipeline. Returns (q_left, q_right)."""
     cam_left = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
     q_left = cam_left.requestOutput(
         (util.WIDTH, util.HEIGHT), type=dai.ImgFrame.Type.GRAY8
@@ -27,6 +34,7 @@ def create_stereo_queues(pipeline):
 
 
 def rectify_pair(frame_left, frame_right, map1_l, map2_l, map1_r, map2_r):
+    """Remap GRAY frames and convert to BGR. Returns (left_bgr, right_bgr)."""
     left_bgr = cv2.cvtColor(
         cv2.remap(frame_left, map1_l, map2_l, cv2.INTER_LINEAR), cv2.COLOR_GRAY2BGR
     )
@@ -37,6 +45,9 @@ def rectify_pair(frame_left, frame_right, map1_l, map2_l, map1_r, map2_r):
 
 
 def get_camera_intrinsics(calib: dai.CalibrationHandler) -> dict:
+    """
+    Return rectified stereo intrinsics dict (same keys as zed): fx, fy, cx, cy, baseline, width, height.
+    """
     _, _, _, _, K_rect = util.build_rectification_maps(calib)
     return {
         "fx": K_rect["fx"],
@@ -50,6 +61,10 @@ def get_camera_intrinsics(calib: dai.CalibrationHandler) -> dict:
 
 
 def capture_stereo(device: dai.Device):
+    """
+    One grab of rectified stereo. Device must already be open (e.g. from init_oak).
+    Returns (frame_left, frame_right) as numpy BGR. In memory only.
+    """
     calib = device.readCalibration()
     map1_l, map2_l, map1_r, map2_r, _ = util.build_rectification_maps(calib)
 
@@ -75,6 +90,10 @@ def capture_stereo(device: dai.Device):
 
 
 def capture_rectified(out_dir: str = "tmp") -> None:
+    """
+    Stream rectified stereo; press 'c' to save left.png, right.png, intrinsics.json, mask.png to out_dir.
+    Press 'q' to quit. Closes device on exit.
+    """
     os.makedirs(out_dir, exist_ok=True)
     device = dai.Device()
     calib = device.readCalibration()

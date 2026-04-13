@@ -1,3 +1,5 @@
+"""Build-up helpers for OAK-D: rectification maps and saving rectified frames."""
+
 import json
 import os
 
@@ -5,11 +7,17 @@ import cv2
 import depthai as dai
 import numpy as np
 
+# Fixed rectified stereo resolution; do not change (intrinsics/maps depend on it).
 WIDTH = 640
 HEIGHT = 480
 
 
 def build_rectification_maps(calib: dai.CalibrationHandler):
+    """
+    Compute OpenCV stereo rectification maps from OAK-D Lite calibration.
+    Returns (map1_left, map2_left, map1_right, map2_right, K_rect).
+    Uses fixed WIDTH x HEIGHT (640x480).
+    """
     M_left = np.array(calib.getCameraIntrinsics(
         dai.CameraBoardSocket.CAM_B, WIDTH, HEIGHT
     ))
@@ -24,7 +32,7 @@ def build_rectification_maps(calib: dai.CalibrationHandler):
         dai.CameraBoardSocket.CAM_B, dai.CameraBoardSocket.CAM_C
     ))
     R = extrinsics[:3, :3]
-    T = extrinsics[:3, 3]
+    T = extrinsics[:3, 3]  # in cm
 
     img_size = (WIDTH, HEIGHT)
 
@@ -47,7 +55,7 @@ def build_rectification_maps(calib: dai.CalibrationHandler):
     fy = float(P1[1, 1])
     cx = float(P1[0, 2])
     cy = float(P1[1, 2])
-    baseline_m = abs(float(P2[0, 3]) / float(P2[0, 0])) / 100.0
+    baseline_m = abs(float(P2[0, 3]) / float(P2[0, 0])) / 100.0  # cm → m
 
     K_rect = {"fx": fx, "fy": fy, "cx": cx, "cy": cy, "baseline": baseline_m}
 
@@ -61,6 +69,7 @@ def save_rectified(
     K_rect: dict,
     out_dir: str,
 ) -> None:
+    """Rectify frames and write left.png, right.png, intrinsics.json, mask.png to out_dir."""
     os.makedirs(out_dir, exist_ok=True)
 
     rect_left = cv2.remap(frame_left, map1_l, map2_l, cv2.INTER_LINEAR)
@@ -71,8 +80,15 @@ def save_rectified(
     cv2.imwrite(os.path.join(out_dir, "left.png"), left_bgr)
     cv2.imwrite(os.path.join(out_dir, "right.png"), right_bgr)
 
+    intrinsics_data = {
+        **K_rect,
+        "width": WIDTH,
+        "height": HEIGHT,
+    }
     with open(os.path.join(out_dir, "intrinsics.json"), "w") as f:
-        json.dump({**K_rect, "width": WIDTH, "height": HEIGHT}, f, indent=2)
+        json.dump(intrinsics_data, f, indent=2)
 
-    cv2.imwrite(os.path.join(out_dir, "mask.png"), np.full((HEIGHT, WIDTH), 255, dtype=np.uint8))
+    mask = np.full((HEIGHT, WIDTH), 255, dtype=np.uint8)
+    cv2.imwrite(os.path.join(out_dir, "mask.png"), mask)
+
     print(f"Captured to {out_dir}/ (fx={K_rect['fx']:.1f} baseline={K_rect['baseline']:.4f}m)")
