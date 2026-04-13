@@ -5,6 +5,7 @@ requires-python = ">=3.10,<3.11"
 dependencies = [
     'pyzed; sys_platform == "linux" and platform_machine == "aarch64"',
     "torch",
+    "torchvision",
     "timm",
     "einops",
     "omegaconf",
@@ -27,6 +28,10 @@ environments = [
 [tool.uv.sources]
 pyzed = { path = "../pyzed-5.0-cp310-cp310-linux_aarch64.whl", marker = 'sys_platform == "linux" and platform_machine == "aarch64"' }
 torch = [
+    { index = "jetson",  marker = "platform_machine == 'aarch64'" },
+    { index = "pytorch", marker = "platform_machine == 'x86_64'" },
+]
+torchvision = [
     { index = "jetson",  marker = "platform_machine == 'aarch64'" },
     { index = "pytorch", marker = "platform_machine == 'x86_64'" },
 ]
