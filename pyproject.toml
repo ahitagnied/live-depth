@@ -16,7 +16,6 @@ dependencies = [
     "opencv-contrib-python-headless",
     "imageio",
     "pyyaml",
-    "open3d",
 ]
 
 # torch + torchvision come from NVIDIA's Jetson wheel index on Jetson;
