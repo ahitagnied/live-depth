@@ -90,8 +90,9 @@ class DepthEstimator:
             if hi > lo:
                 norm[valid] = ((disp[valid] - lo) / (hi - lo) * 255).astype(np.uint8)
 
-        return np.concatenate([cv2.resize(left_bgr, (W, H)),
-                                cv2.applyColorMap(norm, cv2.COLORMAP_TURBO)], axis=1)
+        return (np.concatenate([cv2.resize(left_bgr, (W, H)),
+                                cv2.applyColorMap(norm, cv2.COLORMAP_TURBO)], axis=1),
+                disp)
 
     def infer_full(self, left_bgr, right_bgr, intrinsics_txt=None, zfar=100.0):
         import imageio.v3 as iio, torch
