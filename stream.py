@@ -15,7 +15,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from camera.oak import init_oak, build_rectification_maps, create_stereo_queues, rectify_pair
+from camera.oak import (
+    init_oak, get_camera_intrinsics,
+    build_rectification_maps, create_stereo_queues, rectify_pair,
+)
 from main import DepthEstimator, WEIGHTS_PATH
 
 _cond = threading.Condition()
@@ -26,6 +29,9 @@ _jpg:         bytes             = b""
 _disp:        np.ndarray | None = None
 _left_scaled: np.ndarray | None = None  # left BGR at disparity resolution
 
+# camera intrinsics (set once at startup)
+_intrinsics: dict | None = None
+
 # captured state (frozen on /capture)
 _cap_left_jpg: bytes             = b""
 _cap_disp:     np.ndarray | None = None
@@ -33,24 +39,52 @@ _cap_disp:     np.ndarray | None = None
 
 # ── profile plot ──────────────────────────────────────────────────────────────
 
-def _profile_png(disp: np.ndarray, x0: int, y0: int, x1: int, y1: int) -> bytes:
+def _profile_png(disp: np.ndarray, intrinsics: dict,
+                 x0: int, y0: int, x1: int, y1: int) -> bytes:
+    import scipy.stats
+
+    fx       = intrinsics["fx"]
+    baseline = intrinsics["baseline"]   # metres
+
     H, W = disp.shape
     n    = max(int(np.hypot(x1 - x0, y1 - y0)) * 2, 2)
     xs   = np.linspace(x0, x1, n).clip(0, W - 1).astype(int)
     ys   = np.linspace(y0, y1, n).clip(0, H - 1).astype(int)
-    vals = disp[ys, xs].astype(float)
+    d    = disp[ys, xs].astype(float)
     dist = np.linspace(0, np.hypot(x1 - x0, y1 - y0), n)
 
-    fig, ax = plt.subplots(figsize=(8, 3), facecolor="#111")
-    ax.set_facecolor("#1a1a1a")
-    ax.plot(dist, vals, color="#00e5ff", linewidth=1.5)
-    base = vals[vals > 0].min() * 0.85 if (vals > 0).any() else 0
-    ax.fill_between(dist, base, vals, alpha=0.2, color="#00e5ff")
-    ax.set_xlabel("distance along line (px)", color="#ccc")
-    ax.set_ylabel("disparity  (higher = closer)", color="#ccc")
-    ax.tick_params(colors="#999")
+    valid = d > 0
+    depth = np.full(n, np.nan)
+    depth[valid] = fx * baseline / d[valid]          # metres
+
+    # Floor = belt = farther pixels (higher depth).
+    # Use the top 60 % of depth values as floor candidates and fit a
+    # linear slope to handle any camera tilt across the line.
+    height_mm = np.full(n, np.nan)
+    if valid.sum() >= 4:
+        lo = np.nanpercentile(depth[valid], 40)
+        floor_mask = valid & (depth >= lo)
+        if floor_mask.sum() >= 2:
+            slope, intercept, *_ = scipy.stats.linregress(
+                dist[floor_mask], depth[floor_mask]
+            )
+            floor = slope * dist + intercept
+        else:
+            floor = np.full(n, np.nanmedian(depth[valid]))
+        # height = how far object is in front of the belt plane, in mm
+        height_mm = np.where(valid, np.maximum(floor - depth, 0) * 1000, np.nan)
+
+    fig, ax = plt.subplots(figsize=(8, 3), facecolor="white")
+    ax.set_facecolor("white")
+    ax.plot(dist, height_mm, color="#1a6fdb", linewidth=1.5)
+    ax.fill_between(dist, 0, height_mm, alpha=0.15, color="#1a6fdb",
+                    where=~np.isnan(height_mm))
+    ax.axhline(0, color="#999", linewidth=0.8, linestyle="--", label="belt")
+    ax.set_xlabel("distance along line (px)", color="#333")
+    ax.set_ylabel("height above belt (mm)", color="#333")
+    ax.tick_params(colors="#333")
     for spine in ax.spines.values():
-        spine.set_edgecolor("#333")
+        spine.set_edgecolor("#ccc")
     fig.tight_layout()
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
@@ -61,10 +95,10 @@ def _profile_png(disp: np.ndarray, x0: int, y0: int, x1: int, y1: int) -> bytes:
 # ── HTML ──────────────────────────────────────────────────────────────────────
 
 _INDEX_HTML = (
-    b'<html><body style="margin:0;background:#000">'
+    b'<html><body style="margin:0;background:#fff">'
     b'<img src="/stream" style="width:100%;height:100vh;object-fit:contain">'
     b'<div style="position:fixed;top:10px;left:10px">'
-    b'<a href="/capture" style="color:#0af;background:rgba(0,0,0,.7);'
+    b'<a href="/capture" style="color:#fff;background:#1a6fdb;'
     b'padding:8px 16px;border-radius:6px;text-decoration:none;font-family:sans-serif">'
     b'&#9654; Capture &amp; profile</a></div>'
     b'</body></html>'
@@ -74,16 +108,16 @@ _INSPECT_HTML = b"""\
 <!doctype html><html>
 <head><title>Profile Inspector</title>
 <style>
-  body { margin:0; background:#111; color:#ddd; font-family:sans-serif;
+  body { margin:0; background:#fff; color:#222; font-family:sans-serif;
          display:flex; flex-direction:column; align-items:center; padding:16px; gap:12px; }
   h2   { margin:0; }
   #wrap { display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap; }
-  canvas { cursor:crosshair; border:1px solid #333; max-width:640px; }
-  #status { color:#aaa; font-size:.9em; margin-bottom:6px; }
-  #plot   { display:none; max-width:640px; border:1px solid #333; }
-  button  { margin-top:8px; padding:6px 16px; background:#333; color:#ddd;
+  canvas { cursor:crosshair; border:1px solid #ccc; max-width:640px; }
+  #status { color:#666; font-size:.9em; margin-bottom:6px; }
+  #plot   { display:none; max-width:640px; border:1px solid #ccc; }
+  button  { margin-top:8px; padding:6px 16px; background:#1a6fdb; color:#fff;
              border:none; border-radius:4px; cursor:pointer; }
-  button:hover { background:#444; }
+  button:hover { background:#155bb5; }
 </style>
 </head>
 <body>
@@ -213,10 +247,11 @@ class _Handler(BaseHTTPRequestHandler):
             except (KeyError, ValueError, IndexError):
                 self._send(400, "text/plain", b"bad params"); return
             with _lock:
-                disp = _cap_disp
-            if disp is None:
+                disp       = _cap_disp
+                intrinsics = _intrinsics
+            if disp is None or intrinsics is None:
                 self._send(503, "text/plain", b"no capture yet"); return
-            self._send(200, "image/png", _profile_png(disp, x0, y0, x1, y1))
+            self._send(200, "image/png", _profile_png(disp, intrinsics, x0, y0, x1, y1))
 
         else:
             self.send_response(404); self.end_headers()
@@ -235,7 +270,7 @@ def main():
     ap.add_argument("--max-disp",    type=int,   default=192)
     args = ap.parse_args()
 
-    global _jpg, _disp, _left_scaled
+    global _jpg, _disp, _left_scaled, _intrinsics
 
     est = DepthEstimator(args.weights, args.scale, args.valid_iters, args.max_disp)
 
@@ -244,6 +279,7 @@ def main():
     print(f"http://0.0.0.0:{args.port}")
 
     device, calib = init_oak()
+    _intrinsics   = get_camera_intrinsics(calib)
     try:
         map1_l, map2_l, map1_r, map2_r, _ = build_rectification_maps(calib)
 
